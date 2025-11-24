@@ -1,12 +1,15 @@
 import Web3 from 'web3'
 import KramikAuthABI from '../contracts/KramikAuth.json'
+import KramikAcademicRecordsABI from '../contracts/KramikAcademicRecords.json'
 
 class BlockchainService {
   constructor() {
     this.web3 = null
     this.contract = null
+    this.academicContract = null
     this.currentAccount = null
     this.contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS
+    this.academicContractAddress = import.meta.env.VITE_ACADEMIC_CONTRACT_ADDRESS
   }
 
   async connectWallet() {
@@ -53,6 +56,14 @@ class BlockchainService {
       KramikAuthABI.abi,
       this.contractAddress
     )
+
+    // Initialize academic records contract
+    if (this.academicContractAddress) {
+      this.academicContract = new this.web3.eth.Contract(
+        KramikAcademicRecordsABI.abi,
+        this.academicContractAddress
+      )
+    }
   }
 
   async signMessage(message) {
@@ -163,6 +174,247 @@ class BlockchainService {
     const targetChainId = import.meta.env.VITE_BLOCKCHAIN_NETWORK === 'sepolia' ? 11155111 : 1
 
     return chainId === targetChainId
+  }
+
+  // ============ ACADEMIC RECORDS METHODS ============
+
+  /**
+   * Record quiz submission on blockchain
+   */
+  async recordQuizOnBlockchain(quizData) {
+    if (!this.academicContract || !this.currentAccount) {
+      throw new Error('Academic contract not initialized or wallet not connected')
+    }
+
+    try {
+      const { subjectCode, questions, answers, score, totalQuestions } = quizData
+
+      // Create hash of quiz questions
+      const quizHash = this.web3.utils.sha3(
+        JSON.stringify({
+          subjectCode,
+          questions: questions.map(q => q.question),
+          timestamp: Date.now()
+        })
+      )
+
+      // Create hash of student answers
+      const answerHash = this.web3.utils.sha3(
+        JSON.stringify({
+          answers,
+          timestamp: Date.now()
+        })
+      )
+
+      const transaction = await this.academicContract.methods
+        .recordQuizSubmission(
+          this.currentAccount,
+          quizHash,
+          answerHash,
+          Math.floor(score),
+          totalQuestions,
+          subjectCode
+        )
+        .send({
+          from: this.currentAccount,
+          gas: 500000
+        })
+
+      return {
+        success: true,
+        transactionHash: transaction.transactionHash,
+        quizHash,
+        answerHash
+      }
+    } catch (error) {
+      console.error('Blockchain quiz recording failed:', error)
+      throw new Error('Failed to record quiz on blockchain: ' + error.message)
+    }
+  }
+
+  /**
+   * Record schedule completion on blockchain
+   */
+  async recordScheduleCompletionOnBlockchain(scheduleData) {
+    if (!this.academicContract || !this.currentAccount) {
+      throw new Error('Academic contract not initialized or wallet not connected')
+    }
+
+    try {
+      const { scheduleId, creditsEarned, scheduleTitle } = scheduleData
+
+      // Create hash of schedule ID
+      const scheduleHash = this.web3.utils.sha3(scheduleId.toString())
+
+      const transaction = await this.academicContract.methods
+        .recordScheduleCompletion(
+          this.currentAccount,
+          scheduleHash,
+          creditsEarned,
+          scheduleTitle
+        )
+        .send({
+          from: this.currentAccount,
+          gas: 400000
+        })
+
+      return {
+        success: true,
+        transactionHash: transaction.transactionHash,
+        scheduleHash
+      }
+    } catch (error) {
+      console.error('Blockchain schedule recording failed:', error)
+      throw new Error('Failed to record schedule completion: ' + error.message)
+    }
+  }
+
+  /**
+   * Get student's quiz records from blockchain
+   */
+  async getStudentQuizRecords(studentAddress = null) {
+    if (!this.academicContract) {
+      throw new Error('Academic contract not initialized')
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      const records = await this.academicContract.methods
+        .getStudentQuizRecords(address)
+        .call()
+
+      return records.map(record => ({
+        quizHash: record.quizHash,
+        answerHash: record.answerHash,
+        score: parseInt(record.score),
+        totalQuestions: parseInt(record.totalQuestions),
+        timestamp: parseInt(record.timestamp) * 1000,
+        subjectCode: record.subjectCode,
+        verified: record.verified
+      }))
+    } catch (error) {
+      console.error('Failed to get quiz records:', error)
+      return []
+    }
+  }
+
+  /**
+   * Get student's schedule completions from blockchain
+   */
+  async getStudentScheduleCompletions(studentAddress = null) {
+    if (!this.academicContract) {
+      throw new Error('Academic contract not initialized')
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      const completions = await this.academicContract.methods
+        .getStudentScheduleCompletions(address)
+        .call()
+
+      return completions.map(completion => ({
+        scheduleId: completion.scheduleId,
+        creditsEarned: parseInt(completion.creditsEarned),
+        completionDate: parseInt(completion.completionDate) * 1000,
+        scheduleTitle: completion.scheduleTitle,
+        verified: completion.verified
+      }))
+    } catch (error) {
+      console.error('Failed to get schedule completions:', error)
+      return []
+    }
+  }
+
+  /**
+   * Get student's blockchain credit balance
+   */
+  async getStudentBlockchainCredits(studentAddress = null) {
+    if (!this.academicContract) {
+      throw new Error('Academic contract not initialized')
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      const credits = await this.academicContract.methods
+        .getStudentCredits(address)
+        .call()
+
+      return {
+        totalCredits: parseInt(credits.totalCredits),
+        completedSchedules: parseInt(credits.completedSchedules),
+        quizzesTaken: parseInt(credits.quizzesTaken),
+        lastUpdated: parseInt(credits.lastUpdated) * 1000
+      }
+    } catch (error) {
+      console.error('Failed to get blockchain credits:', error)
+      return null
+    }
+  }
+
+  /**
+   * Verify if a quiz was submitted on blockchain
+   */
+  async verifyQuizSubmission(quizHash, studentAddress = null) {
+    if (!this.academicContract) {
+      return false
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      return await this.academicContract.methods
+        .verifyQuizSubmission(address, quizHash)
+        .call()
+    } catch (error) {
+      console.error('Quiz verification failed:', error)
+      return false
+    }
+  }
+
+  /**
+   * Verify if a schedule was completed on blockchain
+   */
+  async verifyScheduleCompletion(scheduleId, studentAddress = null) {
+    if (!this.academicContract) {
+      return false
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      const scheduleHash = this.web3.utils.sha3(scheduleId.toString())
+      return await this.academicContract.methods
+        .verifyScheduleCompletion(address, scheduleHash)
+        .call()
+    } catch (error) {
+      console.error('Schedule verification failed:', error)
+      return false
+    }
+  }
+
+  /**
+   * Get blockchain stats for student dashboard
+   */
+  async getStudentBlockchainStats(studentAddress = null) {
+    if (!this.academicContract) {
+      return null
+    }
+
+    try {
+      const address = studentAddress || this.currentAccount
+      const [credits, quizCount, scheduleCount] = await Promise.all([
+        this.getStudentBlockchainCredits(address),
+        this.academicContract.methods.getQuizCount(address).call(),
+        this.academicContract.methods.getScheduleCompletionCount(address).call()
+      ])
+
+      return {
+        ...credits,
+        quizCount: parseInt(quizCount),
+        scheduleCount: parseInt(scheduleCount)
+      }
+    } catch (error) {
+      console.error('Failed to get blockchain stats:', error)
+      return null
+    }
   }
 }
 

@@ -34,9 +34,16 @@ api.interceptors.response.use(
       localStorage.removeItem('kramik_token')
       window.location.href = '/login'
     }
-    
-    const message = error.response?.data?.error || error.message || 'An error occurred'
-    return Promise.reject(new Error(message))
+
+    const message =
+      error.response?.data?.error ||
+      error.response?.data?.message ||
+      error.message ||
+      'An unexpected error occurred'
+
+    // Preserve original metadata so callers can inspect status/body
+    error.message = message
+    return Promise.reject(error)
   }
 )
 
@@ -56,14 +63,32 @@ export const studentAPI = {
   uploadProfileImage: (formData) => api.post('/students/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  getAssignments: () => api.get('/students/assignments'),
+  markAssignmentComplete: (assignmentId) => api.post(`/students/assignments/${assignmentId}/complete`),
+  getSchedule: () => api.get('/students/schedule'),
+  markScheduleComplete: (scheduleId) => api.post(`/students/schedule/${scheduleId}/complete`),
 }
 
 export const adminAPI = {
   getDashboard: () => api.get('/admin/dashboard'),
+  getProfile: () => api.get('/admin/profile'),
+  updateProfile: (data) => api.put('/admin/profile', data),
   getUsers: (params) => api.get('/admin/users', { params }),
   createSubject: (data) => api.post('/admin/subjects', data),
   updateSubject: (id, data) => api.put(`/admin/subjects/${id}`, data),
   deleteSubject: (id) => api.delete(`/admin/subjects/${id}`),
+  getAssignments: () => api.get('/admin/assignments'),
+  createAssignment: (data) => api.post('/admin/assignments', data),
+  createAssignmentWithFile: (formData) => api.post('/admin/assignments', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  updateAssignment: (id, data) => api.put(`/admin/assignments/${id}`, data),
+  deleteAssignment: (id) => api.delete(`/admin/assignments/${id}`),
+  deleteStudent: (id) => api.delete(`/admin/students/${id}`),
+  getSchedule: () => api.get('/admin/schedule'),
+  createScheduleEntry: (data) => api.post('/admin/schedule', data),
+  updateScheduleEntry: (id, data) => api.put(`/admin/schedule/${id}`, data),
+  deleteScheduleEntry: (id) => api.delete(`/admin/schedule/${id}`),
 }
 
 export const subjectsAPI = {

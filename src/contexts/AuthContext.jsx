@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { markTodayAttendance, getAttendanceStats } from '../utils/attendanceUtils'
+import { authAPI } from '../services/api'
 
 const AuthContext = createContext()
 
@@ -22,21 +24,26 @@ export const AuthProvider = ({ children }) => {
   const checkAuthStatus = async () => {
     try {
       const token = localStorage.getItem('kramik_token')
-      if (token) {
+      const storedUser = localStorage.getItem('kramik_user')
+      
+      if (token && storedUser) {
         // Simulate token verification - replace with actual API call
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await new Promise(resolve => setTimeout(resolve, 500))
         
-        // Mock user data - replace with actual user data from API
-        setUser({
-          id: '1',
-          name: 'Demo Student',
-          email: 'demo@kramik.com',
-          userType: 'student',
-          walletAddress: null
-        })
+        const userData = JSON.parse(storedUser)
+        setUser(userData)
+        
+        // Mark attendance on page refresh/reload if logged in as student
+        if (userData.userType === 'student') {
+          const attendanceResult = markTodayAttendance()
+          if (!attendanceResult.alreadyMarked) {
+            console.log('✅ Attendance marked on session restore')
+          }
+        }
       }
     } catch (error) {
       localStorage.removeItem('kramik_token')
+      localStorage.removeItem('kramik_user')
       console.error('Auth check failed:', error)
     } finally {
       setLoading(false)
@@ -47,26 +54,30 @@ export const AuthProvider = ({ children }) => {
     setLoading(true)
     setError(null)
     try {
-      // Simulate API call - replace with actual login API
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const response = await authAPI.login(credentials)
+      const { user: userData, token } = response.data
       
-      const userData = {
-        id: '1',
-        name: 'Demo Student',
-        email: credentials.email,
-        userType: 'student',
-        walletAddress: null
+      if (userData.userType === 'student') {
+        // Mark attendance on login for students only
+        const attendanceResult = markTodayAttendance()
+        const stats = getAttendanceStats()
+        
+        console.log('📅 Login Attendance Update:', {
+          markedToday: !attendanceResult.alreadyMarked,
+          currentAttendance: `${stats.percentage}%`,
+          presentDays: stats.presentDays,
+          workingDays: stats.workingDays
+        })
       }
       
       setUser(userData)
-      localStorage.setItem('kramik_token', 'demo-token')
+      localStorage.setItem('kramik_token', token)
+      localStorage.setItem('kramik_user', JSON.stringify(userData))
       
-      return {
-        user: userData,
-        token: 'demo-token'
-      }
+      return userData
     } catch (error) {
-      setError('Login failed. Please try again.')
+      console.error('Login failed:', error)
+      setError(error.message || 'Login failed')
       throw error
     } finally {
       setLoading(false)
@@ -77,26 +88,30 @@ export const AuthProvider = ({ children }) => {
     setLoading(true)
     setError(null)
     try {
-      // Simulate API call - replace with actual registration API
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const response = await authAPI.register(userData)
+      const { user: newUser, token } = response.data
       
-      const newUser = {
-        id: '2',
-        name: userData.name,
-        email: userData.email,
-        userType: 'student',
-        walletAddress: null
+      if (newUser.userType === 'student') {
+        // Mark attendance on registration for students
+        const attendanceResult = markTodayAttendance()
+        const stats = getAttendanceStats()
+        
+        console.log('📅 Registration Attendance Update:', {
+          markedToday: !attendanceResult.alreadyMarked,
+          currentAttendance: `${stats.percentage}%`,
+          presentDays: stats.presentDays,
+          workingDays: stats.workingDays
+        })
       }
       
       setUser(newUser)
-      localStorage.setItem('kramik_token', 'demo-token')
+      localStorage.setItem('kramik_token', token)
+      localStorage.setItem('kramik_user', JSON.stringify(newUser))
       
-      return {
-        user: newUser,
-        token: 'demo-token'
-      }
+      return newUser
     } catch (error) {
-      setError('Registration failed. Please try again.')
+      console.error('Registration failed:', error)
+      setError(error.message || 'Registration failed')
       throw error
     } finally {
       setLoading(false)
@@ -107,26 +122,45 @@ export const AuthProvider = ({ children }) => {
     setLoading(true)
     setError(null)
     try {
-      // Simulate blockchain authentication - replace with actual API
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      console.log('🔗 Calling blockchain login API...', { 
+        messagePreview: message.substring(0, 50),
+        signaturePreview: signature.substring(0, 20),
+        userType 
+      })
       
-      const userData = {
-        id: '3',
-        name: 'Blockchain User',
-        email: 'blockchain@kramik.com',
-        userType: userType,
-        walletAddress: '0x742...d35a'
+      const response = await authAPI.blockchainLogin({ message, signature, userType })
+      
+      console.log('📦 Blockchain login response:', response.data)
+      
+      const { user: userData, token } = response.data
+      
+      if (userData.userType === 'student') {
+        // Mark attendance on login for students
+        const attendanceResult = markTodayAttendance()
+        const stats = getAttendanceStats()
+        
+        console.log('📅 Blockchain Login Attendance Update:', {
+          markedToday: !attendanceResult.alreadyMarked,
+          currentAttendance: `${stats.percentage}%`,
+          presentDays: stats.presentDays,
+          workingDays: stats.workingDays
+        })
       }
       
       setUser(userData)
-      localStorage.setItem('kramik_token', 'blockchain-token')
+      localStorage.setItem('kramik_token', token)
+      localStorage.setItem('kramik_user', JSON.stringify(userData))
       
-      return {
-        user: userData,
-        token: 'blockchain-token'
-      }
+      console.log('✅ Blockchain login complete, user set in context')
+      
+      return userData
     } catch (error) {
-      setError('Blockchain authentication failed.')
+      console.error('❌ Blockchain login failed:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      })
+      setError(error.message || 'Blockchain authentication failed')
       throw error
     } finally {
       setLoading(false)
@@ -137,6 +171,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null)
     setError(null)
     localStorage.removeItem('kramik_token')
+    localStorage.removeItem('kramik_user')
   }
 
   const updateProfile = async (profileData) => {
